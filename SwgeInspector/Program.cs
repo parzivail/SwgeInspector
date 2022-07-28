@@ -1,4 +1,5 @@
 ﻿using System.IO.Ports;
+using BleBeacon;
 using Mtk33x9Gps;
 using NavXMxp;
 
@@ -6,7 +7,7 @@ namespace SwgeInspector;
 
 public class Program
 {
-	public static void Main(string[] args)
+	public static async Task Main(string[] args)
 	{
 		// NormalizeSerialDataRate(args[0]);
 		//
@@ -25,11 +26,13 @@ public class Program
 		//
 		// gps.Start();
 		
-		using var socket = new SerialPort("COM6", 57600);
-		socket.Open();
-		
-		var navx = new NavX(socket.BaseStream);
-		navx.Start();
+		// using var socket = new SerialPort("COM6", 57600);
+		// socket.Open();
+		//
+		// var navx = new NavX(socket.BaseStream);
+		// navx.Start();
+
+		await BleDevice.Run();
 		
 		var mres = new ManualResetEventSlim();
 		mres.Wait();

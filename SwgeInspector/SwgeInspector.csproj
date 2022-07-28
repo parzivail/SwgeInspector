@@ -12,6 +12,7 @@
     </ItemGroup>
 
     <ItemGroup>
+      <ProjectReference Include="..\BleBeacon\BleBeacon.csproj" />
       <ProjectReference Include="..\Mtk33x9Gps\Mtk33x9Gps.csproj" />
       <ProjectReference Include="..\NavXMxp\NavXMxp.csproj" />
     </ItemGroup>
