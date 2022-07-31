@@ -1,4 +1,9 @@
 ﻿using System.Collections.Concurrent;
+using System.Text;
+using DotnetBleServer.Advertisements;
+using DotnetBleServer.Core;
+using DotnetBleServer.Gatt;
+using DotnetBleServer.Gatt.Description;
 using HashtagChris.DotNetBlueZ;
 using HashtagChris.DotNetBlueZ.Extensions;
 using Microsoft.IO;
@@ -6,76 +11,81 @@ using Tmds.DBus;
 
 namespace BleBeacon;
 
-public class BleDevice
+public class SampleAdvertisement
 {
-    private static readonly RecyclableMemoryStreamManager MemoryStreamManager = new();
-    
-    public static ushort ReverseBytes(ushort value)
+    public static async Task RegisterSampleAdvertisement(ServerContext serverContext)
     {
-         return (ushort)((value & 0xFFU) << 8 | (value & 0xFF00U) >> 8);
+        var advertisementProperties = new AdvertisementProperties
+        {
+            Type = "peripheral",
+            LocalName = "Stardust",
+            ManufacturerData = new Dictionary<ushort, object>()
+            {
+                [0x004C] = Convert.FromHexString("0215DEADBEEFDEADBEEFDEADBEEFDEADBEEFA2B8270FB3")
+            }
+        };
+
+        await new AdvertisingManager(serverContext).CreateAdvertisement(advertisementProperties, "/org/bluez/hci1");
+    }
+}
+
+internal class SampleGattApplication
+{
+    public static async Task RegisterGattApplication(ServerContext serverContext)
+    {
+        var gattServiceDescription = new GattServiceDescription
+        {
+            UUID = "12345678-1234-5678-1234-56789abcdef0",
+            Primary = true
+        };
+
+        var gattCharacteristicDescription = new GattCharacteristicDescription
+        {
+            CharacteristicSource = new ExampleCharacteristicSource(),
+            UUID = "12345678-1234-5678-1234-56789abcdef1",
+            Flags = CharacteristicFlags.Read | CharacteristicFlags.Write | CharacteristicFlags.WritableAuxiliaries
+        };
+        var gattDescriptorDescription = new GattDescriptorDescription
+        {
+            Value = new[] { (byte)'t' },
+            UUID = "12345678-1234-5678-1234-56789abcdef2",
+            Flags = new[] { "read", "write" }
+        };
+        var gab = new GattApplicationBuilder();
+        gab
+            .AddService(gattServiceDescription)
+            .WithCharacteristic(gattCharacteristicDescription, Array.Empty<GattDescriptorDescription>());
+
+        await new GattApplicationManager(serverContext).RegisterGattApplication(gab.BuildServiceDescriptions(),
+            "/org/bluez/hci1");
     }
 
+    internal class ExampleCharacteristicSource : ICharacteristicSource
+    {
+        public Task WriteValueAsync(byte[] value)
+        {
+            Console.WriteLine("Writing value");
+            return Task.Run(() => Console.WriteLine(Encoding.ASCII.GetChars(value)));
+        }
+
+        public Task<byte[]> ReadValueAsync()
+        {
+            Console.WriteLine("Reading value");
+            return Task.FromResult(BitConverter.GetBytes(DateTime.Now.Ticks));
+        }
+    }
+}
+
+public class BleDevice
+{
     public static async Task Run()
     {
-        Console.WriteLine("Getting adapter");
-        var adapter = await BlueZManager.GetAdapterAsync("hci1");
+        using var serverContext = new ServerContext();
 
-        var timeout = TimeSpan.FromSeconds(3);
-        // adapter.DeviceFound += async (sender, args) => await InterrogateDevice(args.Device, timeout);
+        await serverContext.Connect();
+        await SampleAdvertisement.RegisterSampleAdvertisement(serverContext);
+        await SampleGattApplication.RegisterGattApplication(serverContext);
 
-        var address = "EA:3D:77:C8:12:75";
-
-        Console.WriteLine($"Looking for device {address}");
-
-        await adapter.StartDiscoveryAsync();
-        // Device? device;
-        // do
-        // {
-        //     device = await adapter.GetDeviceAsync(address);
-        //     Thread.Sleep(500);
-        // } while (device == null);
-        //
-        // await adapter.StopDiscoveryAsync();
-        //
-        // Console.WriteLine("Found device");
-
-        while (true)
-        {
-            var devices = await adapter.GetDevicesAsync();
-            foreach (var device in devices)
-            {
-                IDictionary<ushort, object> data;
-                try
-                {
-                    data = await device.GetManufacturerDataAsync();
-                }
-                catch (DBusException)
-                {
-                    continue;
-                }
-                
-                if (!data.TryGetValue(0x004C, out var manufData) || !(manufData is byte[] array))
-                    continue;
-
-                using var ms = MemoryStreamManager.GetStream(array);
-                using var br = new BinaryReader(ms);
-
-                var ibeaconSubtype = br.ReadByte();
-                if (ibeaconSubtype != 2)
-                    continue;
-                
-                var ibeaconSubtypeLength = br.ReadByte();
-
-                var uuid = Convert.ToHexString(br.ReadBytes(16));
-                var major = ReverseBytes(br.ReadUInt16());
-                var minor = ReverseBytes(br.ReadUInt16());
-                var txPower = br.ReadSByte();
-                    
-                Console.WriteLine($"{uuid} {major} {minor} {txPower}");
-            }
-
-            Console.WriteLine();
-            Thread.Sleep(1000);
-        }
+        await Task.Delay(-1);
     }
 }
