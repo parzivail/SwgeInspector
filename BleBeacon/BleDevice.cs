@@ -12,50 +12,25 @@ using Tmds.DBus;
 
 namespace BleBeacon;
 
-public class SampleAdvertisement
+public class BleDevice
 {
-    public static async Task RegisterSampleAdvertisement(ServerContext serverContext)
-    {
-        var advertisementProperties = new AdvertisementProperties
-        {
-            Type = "peripheral",
-            LocalName = "Stardust",
-            ManufacturerData = new Dictionary<ushort, object>()
-            {
-                [0x004C] = Convert.FromHexString("0215DEADBEEFDEADBEEFDEADBEEFDEADBEEFA2B8270FB3")
-            }
-        };
+    private static readonly RecyclableMemoryStreamManager _memoryStreamManager = new();
+    private static readonly ValueBackedCharacteristicSource _characteristic = new();
 
-        await new AdvertisingManager(serverContext)
-            .CreateAdvertisement("/org/bluez/example/advertisement0", advertisementProperties);
-    }
-}
-
-internal class SampleGattApplication
-{
     public static async Task RegisterGattApplication(ServerContext serverContext)
     {
         var gattServiceDescription = new GattServiceDescription
         {
-            UUID = "12345678-1234-5678-1234-56789abcdef0",
+            UUID = "a720b426-e3fd-48ed-9861-a7b6ff000000",
             Primary = true
         };
 
-        var c = new ValueBackedCharacteristicSource();
-        c.ValueSet += (value, response, didNotify) => { Console.WriteLine(Encoding.UTF8.GetString(value)); };
-
         var gattCharacteristicDescription = new GattCharacteristicDescription
         {
-            CharacteristicSource = c,
-            UUID = "12345678-1234-5678-1234-56789abcdef1",
+            CharacteristicSource = _characteristic,
+            UUID = "a720b426-e3fd-48ed-9861-a7b6ff000001",
             Flags = CharacteristicFlags.Read | CharacteristicFlags.Write | CharacteristicFlags.WritableAuxiliaries |
                     CharacteristicFlags.Notify
-        };
-        var gattDescriptorDescription = new GattDescriptorDescription
-        {
-            Value = new[] { (byte)'t' },
-            UUID = "12345678-1234-5678-1234-56789abcdef2",
-            Flags = new[] { "read", "write" }
         };
         var gab = new GattApplicationBuilder();
         gab
@@ -63,12 +38,9 @@ internal class SampleGattApplication
             .WithCharacteristic(gattCharacteristicDescription, Array.Empty<GattDescriptorDescription>());
 
         await new GattApplicationManager(serverContext)
-            .RegisterGattApplication("/org/bluez/example/gattapp0", gab.BuildServiceDescriptions());
+            .RegisterGattApplication("/org/bluez/stardust/gatt", gab.BuildServiceDescriptions());
     }
-}
 
-public class BleDevice
-{
     public static async Task Run()
     {
         var adapter = await GetAdapter(PhysicalAddress.Parse("00:E0:4C:2A:46:52"));
@@ -77,8 +49,36 @@ public class BleDevice
 
         using var serverContext = new ServerContext(adapter.ObjectPath);
         await serverContext.Connect();
-        await SampleAdvertisement.RegisterSampleAdvertisement(serverContext);
-        await SampleGattApplication.RegisterGattApplication(serverContext);
+
+        await new AdvertisingManager(serverContext).CreateAdvertisement(
+            "/org/bluez/stardust/advert",
+            new AdvertisementProperties
+            {
+                Type = "peripheral",
+                LocalName = "Stardust",
+                ManufacturerData = new Dictionary<ushort, object>
+                {
+                    [0x1001] = Encoding.ASCII.GetBytes("STARDUST")
+                }
+            }
+        );
+
+        await RegisterGattApplication(serverContext);
+
+        var random = new Random();
+        var timer = new Timer(async state =>
+        {
+            using var stream = _memoryStreamManager.GetStream();
+            var bw = new BinaryWriter(stream);
+
+            bw.Write(random.NextSingle()); // Latitude
+            bw.Write(random.NextSingle()); // Longitude
+            bw.Write((ushort)random.Next()); // Num Active Beacons
+            bw.Write((ushort)random.Next()); // Num Total Beacons
+            bw.Write(random.NextInt64()); // Num Total Packets
+
+            await _characteristic.WriteValueAsync(stream.ToArray(), false);
+        }, null, TimeSpan.Zero, TimeSpan.FromSeconds(1));
 
         await Task.Delay(-1);
     }
