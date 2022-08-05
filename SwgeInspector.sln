@@ -12,7 +12,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BleSniffer", "BleSniffer\Bl
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DotNet-BlueZ", "DotNet-BlueZ\DotNet-BlueZ.csproj", "{6ECCDA35-7595-4CC3-B370-01730C86AC88}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DotnetBleServer", "..\..\Repositories\dotnet-ble-server\DotnetBleServer\DotnetBleServer.csproj", "{97EA5175-FEEB-481E-8B4B-95A27B552711}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DotnetBleServer", "..\dotnet-ble-server\DotnetBleServer\DotnetBleServer.csproj", "{97EA5175-FEEB-481E-8B4B-95A27B552711}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
