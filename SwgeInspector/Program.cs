@@ -1,5 +1,5 @@
 ﻿using System.IO.Ports;
-using BleBeacon;
+using System.Net.NetworkInformation;
 using BleSniffer;
 using Mtk33x9Gps;
 using NavXMxp;
@@ -8,12 +8,53 @@ namespace SwgeInspector;
 
 public class Program
 {
-    private const string DEVICE_GPS = "/dev/tty_gps";
-    private const string DEVICE_BLE_SNIFFER = "/dev/tty_ble";
-    private const string DEVICE_IMU = "/dev/tty_imu";
+    private const string DeviceGps = "/dev/tty_gps";
+    private const string DeviceBleSniffer = "/dev/tty_ble";
+    private const string DeviceImu = "/dev/tty_imu";
+
+    private static readonly PhysicalAddress DeviceBluetooth = PhysicalAddress.Parse("00:E0:4C:2A:46:52");
+    // private static readonly PhysicalAddress DeviceBluetooth = PhysicalAddress.Parse("DC:A6:32:35:51:86");
+
+    private readonly long _startTicks;
+    private readonly BleServer _bleServer;
+    private readonly BlePcapCapture _blePcapCapture;
+
+    private Program()
+    {
+        _startTicks = DateTime.UtcNow.Ticks;
+        _blePcapCapture = new BlePcapCapture(DeviceBleSniffer, $"ble_sniffer_{_startTicks}.pcap");
+        _bleServer = new BleServer(DeviceBluetooth, WriteGattData);
+    }
+
+    private void WriteGattData(BinaryWriter bw)
+    {
+        bw.Write(0f); // Latitude
+        bw.Write(0f); // Longitude
+        bw.Write((ushort)0); // Num Active Beacons
+        bw.Write((ushort)0); // Num Total Beacons
+        bw.Write(_blePcapCapture.TotalCapturedPackets); // Num Total Packets
+    }
+
+    private async Task Run(string[] args)
+    {
+        // Start BLE capture
+        Console.WriteLine($"Starting BLE capture ({DeviceBleSniffer} => {_blePcapCapture.OutputFile})...");
+        new Thread(_blePcapCapture.Run).Start();
+
+        // Start BLE server
+        Console.WriteLine($"Starting BLE server (adapter {DeviceBluetooth})...");
+        await _bleServer.Start();
+
+        await Task.Delay(-1);
+    }
 
     public static async Task Main(string[] args)
     {
+        // await BleDevice.Run();
+
+        var program = new Program();
+        await program.Run(args);
+
         // NormalizeSerialDataRate(args[0]);
         //
         // using var socket = new SerialPort(args[0], 115200);
@@ -36,33 +77,6 @@ public class Program
         //
         // var navx = new NavX(socket.BaseStream);
         // navx.Start();
-
-        // await BleDevice.Run();
-
-        var nowTicks = DateTime.UtcNow.Ticks;
-
-        // Start BLE capture
-        var pcapFile = $"ble_sniffer_{nowTicks}.pcap";
-        Console.WriteLine($"Starting BLE capture ({pcapFile})...");
-
-        var bleSniffer = new BlePcapCapture(DEVICE_BLE_SNIFFER, pcapFile);
-        new Thread(bleSniffer.Run).Start();
-
-        var lastPacketCount = 0L;
-        var timer = new Timer(async state =>
-        {
-            var packetCount = bleSniffer.Packets;
-            Console.WriteLine(
-                $"{packetCount} (+{packetCount - lastPacketCount}) [{bleSniffer.OutputFileSize:N0} bytes]");
-
-            lastPacketCount = packetCount;
-        }, null, TimeSpan.Zero, TimeSpan.FromSeconds(1));
-
-        await Task.Delay(-1);
-    }
-
-    private static void StartBleCapture()
-    {
     }
 
     private static void NormalizeSerialDataRate(string port)

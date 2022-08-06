@@ -4,24 +4,24 @@ namespace BleSniffer;
 
 public class BlePcapCapture
 {
-    private readonly string _device;
-    private readonly string _outputFile;
+    public string Device { get; }
+    public string OutputFile { get; }
 
-    public long Packets { get; private set; }
+    public long TotalCapturedPackets { get; private set; }
     public long OutputFileSize { get; private set; }
 
     public BlePcapCapture(string device, string outputFile)
     {
-        _device = device;
-        _outputFile = outputFile;
+        Device = device;
+        OutputFile = outputFile;
     }
 
     public void Run()
     {
-        using var ble = new BleSnifferDevice(_device);
+        using var ble = new BleSnifferDevice(Device);
         ble.Open();
 
-        using var outputFileStream = new FileStream(_outputFile, FileMode.Create, FileAccess.Write, FileShare.Read,
+        using var outputFileStream = new FileStream(OutputFile, FileMode.Create, FileAccess.Write, FileShare.Read,
             4096, FileOptions.WriteThrough);
         var pcap = new PcapFile(outputFileStream);
 
@@ -37,7 +37,7 @@ public class BlePcapCapture
 
             pcap.WriteBlePacket(sw.Elapsed, packet);
 
-            Packets++;
+            TotalCapturedPackets++;
             OutputFileSize = outputFileStream.Position;
         }
     }

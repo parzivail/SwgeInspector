@@ -1,23 +1,31 @@
-﻿using System.Collections.Concurrent;
-using System.Net.NetworkInformation;
+﻿using System.Net.NetworkInformation;
 using System.Text;
 using DotnetBleServer.Advertisements;
 using DotnetBleServer.Core;
 using DotnetBleServer.Gatt;
 using DotnetBleServer.Gatt.Description;
 using HashtagChris.DotNetBlueZ;
-using HashtagChris.DotNetBlueZ.Extensions;
 using Microsoft.IO;
-using Tmds.DBus;
 
-namespace BleBeacon;
+namespace SwgeInspector;
 
-public class BleDevice
+public class BleServer : IDisposable
 {
-    private static readonly RecyclableMemoryStreamManager _memoryStreamManager = new();
-    private static readonly ValueBackedCharacteristicSource _characteristic = new();
+    private readonly PhysicalAddress _adapter;
+    private readonly Action<BinaryWriter> _dataWriter;
+    private readonly RecyclableMemoryStreamManager _memoryStreamManager = new();
+    private readonly ValueBackedCharacteristicSource _characteristic = new();
 
-    public static async Task RegisterGattApplication(ServerContext serverContext)
+    private ServerContext? _serverContext;
+    private Timer? _timer;
+
+    public BleServer(PhysicalAddress adapter, Action<BinaryWriter> dataWriter)
+    {
+        _adapter = adapter;
+        _dataWriter = dataWriter;
+    }
+
+    public async Task RegisterGattApplication(ServerContext serverContext)
     {
         var gattServiceDescription = new GattServiceDescription
         {
@@ -41,16 +49,20 @@ public class BleDevice
             .RegisterGattApplication("/org/bluez/stardust/gatt", gab.BuildServiceDescriptions());
     }
 
-    public static async Task Run()
+    public async Task Start()
     {
-        var adapter = await GetAdapter(PhysicalAddress.Parse("00:E0:4C:2A:46:52"));
-        if (adapter == null)
-            throw new InvalidOperationException("Adapter not found");
+        if (_serverContext == null)
+        {
+            var adapter = await GetAdapter(_adapter);
+            if (adapter == null)
+                throw new InvalidOperationException("Adapter not found");
 
-        using var serverContext = new ServerContext(adapter.ObjectPath);
-        await serverContext.Connect();
+            _serverContext = new ServerContext(adapter.ObjectPath);
+        }
 
-        await new AdvertisingManager(serverContext).CreateAdvertisement(
+        await _serverContext.Connect();
+
+        await new AdvertisingManager(_serverContext).CreateAdvertisement(
             "/org/bluez/stardust/advert",
             new AdvertisementProperties
             {
@@ -63,27 +75,22 @@ public class BleDevice
             }
         );
 
-        await RegisterGattApplication(serverContext);
+        await RegisterGattApplication(_serverContext);
 
-        var random = new Random();
-        var timer = new Timer(async state =>
+        if (_timer != null)
+            await _timer.DisposeAsync();
+
+        _timer = new Timer(async state =>
         {
             using var stream = _memoryStreamManager.GetStream();
             var bw = new BinaryWriter(stream);
-
-            bw.Write(random.NextSingle()); // Latitude
-            bw.Write(random.NextSingle()); // Longitude
-            bw.Write((ushort)random.Next()); // Num Active Beacons
-            bw.Write((ushort)random.Next()); // Num Total Beacons
-            bw.Write(random.NextInt64()); // Num Total Packets
+            _dataWriter.Invoke(bw);
 
             await _characteristic.WriteValueAsync(stream.ToArray(), false);
         }, null, TimeSpan.Zero, TimeSpan.FromSeconds(1));
-
-        await Task.Delay(-1);
     }
 
-    private static async Task<Adapter?> GetAdapter(PhysicalAddress address)
+    private async Task<Adapter?> GetAdapter(PhysicalAddress address)
     {
         foreach (var adapter in await BlueZManager.GetAdaptersAsync())
         {
@@ -92,5 +99,10 @@ public class BleDevice
         }
 
         return null;
+    }
+
+    public void Dispose()
+    {
+        _serverContext?.Dispose();
     }
 }
