@@ -2,7 +2,7 @@ using System.Diagnostics;
 
 namespace BleSniffer;
 
-public class BleSnifferThread
+public class BlePcapCapture
 {
     private readonly string _device;
     private readonly string _outputFile;
@@ -10,20 +10,21 @@ public class BleSnifferThread
     public long Packets { get; private set; }
     public long OutputFileSize { get; private set; }
 
-    public BleSnifferThread(string device, string outputFile)
+    public BlePcapCapture(string device, string outputFile)
     {
         _device = device;
         _outputFile = outputFile;
     }
-    
+
     public void Run()
     {
         using var ble = new BleSnifferDevice(_device);
         ble.Open();
 
-        using var outputFileStream = new FileStream(_outputFile, FileMode.Create, FileAccess.Write, FileShare.Read, 4096, FileOptions.WriteThrough);
+        using var outputFileStream = new FileStream(_outputFile, FileMode.Create, FileAccess.Write, FileShare.Read,
+            4096, FileOptions.WriteThrough);
         var pcap = new PcapFile(outputFileStream);
-        
+
         pcap.WriteHeader();
 
         var sw = new Stopwatch();

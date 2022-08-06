@@ -11,24 +11,24 @@ public class BleSnifferDevice : IDisposable
     private const int SlipEscStart = SlipStart + 1;
     private const int SlipEscEnd = SlipEnd + 1;
     private const int SlipEscEsc = SlipEsc + 1;
-    
+
     private static readonly RecyclableMemoryStreamManager MemoryStreamManager = new();
 
-    private readonly BinaryReader _reader;
     private readonly SerialPort _port;
+    private BinaryReader? _reader;
 
     public BleSnifferDevice(string device)
     {
-        _port = new SerialPort("COM4", 460800)
+        _port = new SerialPort(device, 460800)
         {
             RtsEnable = true
         };
-        _reader = new BinaryReader(_port.BaseStream);
     }
 
     public void Open()
     {
         _port.Open();
+        _reader = new BinaryReader(_port.BaseStream);
     }
 
     public void Close()
@@ -38,6 +38,9 @@ public class BleSnifferDevice : IDisposable
 
     private void AdvanceToPacket()
     {
+        if (_reader == null)
+            throw new InvalidOperationException("Cannot read when device is closed");
+
         byte b;
         do
         {
@@ -47,6 +50,9 @@ public class BleSnifferDevice : IDisposable
 
     private byte[] ReadPacketToEnd()
     {
+        if (_reader == null)
+            throw new InvalidOperationException("Cannot read when device is closed");
+
         using var stream = MemoryStreamManager.GetStream();
         while (true)
         {
@@ -73,6 +79,7 @@ public class BleSnifferDevice : IDisposable
                             stream.WriteByte(SlipEnd);
                             break;
                     }
+
                     break;
                 }
                 default:
