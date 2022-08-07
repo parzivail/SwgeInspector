@@ -15,6 +15,8 @@ public class Program : IDisposable
     private static readonly PhysicalAddress DeviceBluetooth = PhysicalAddress.Parse("00:E0:4C:2A:46:52");
     // private static readonly PhysicalAddress DeviceBluetooth = PhysicalAddress.Parse("DC:A6:32:35:51:86");
 
+    private static readonly TimeSpan TenSecondSpan = TimeSpan.FromSeconds(10);
+
     private readonly long _startTicks;
     private readonly BleServer _bleServer;
     private readonly BlePcapCapture _blePcapCapture;
@@ -25,22 +27,26 @@ public class Program : IDisposable
     {
         _startTicks = DateTime.UtcNow.Ticks;
 
-        // _blePcapCapture = new BlePcapCapture(DeviceBleSniffer, $"ble_sniffer_{_startTicks}.pcap");
-        // _gpsLogger = new GpsLogger(DeviceGps, $"gps_{_startTicks}.bin");
-        // _navxLogger = new NavXLogger(DeviceImu, $"imu_{_startTicks}.bin");
-        _blePcapCapture = new BlePcapCapture(DeviceBleSniffer, $"/dev/null");
-        _gpsLogger = new GpsLogger(DeviceGps, $"/dev/null");
-        _navxLogger = new NavXLogger(DeviceImu, $"/dev/null");
+        _blePcapCapture = new BlePcapCapture(DeviceBleSniffer, $"ble_sniffer_{_startTicks}.pcap");
+        _gpsLogger = new GpsLogger(DeviceGps, $"gps_{_startTicks}.bin");
+        _navxLogger = new NavXLogger(DeviceImu, $"imu_{_startTicks}.bin");
+
+        // _blePcapCapture = new BlePcapCapture(DeviceBleSniffer, $"/dev/null");
+        // _gpsLogger = new GpsLogger(DeviceGps, $"/dev/null");
+        // _navxLogger = new NavXLogger(DeviceImu, $"/dev/null");
 
         _bleServer = new BleServer(DeviceBluetooth, WriteGattData);
     }
 
     private void WriteGattData(BinaryWriter bw)
     {
+        var tenSecondsAgo = DateTime.UtcNow - TenSecondSpan;
+
         bw.Write(_gpsLogger.Latitude); // Latitude
         bw.Write(_gpsLogger.Longitude); // Longitude
-        bw.Write((ushort)0); // Num Active Beacons
-        bw.Write((ushort)0); // Num Total Beacons
+        bw.Write((ushort)_blePcapCapture.DeviceHeartbeat.Count(pair =>
+            pair.Value > tenSecondsAgo)); // Num Active Beacons
+        bw.Write((ushort)_blePcapCapture.DeviceHeartbeat.Count); // Num Total Beacons
         bw.Write(_blePcapCapture.TotalCapturedPackets); // Num Total Packets
     }
 

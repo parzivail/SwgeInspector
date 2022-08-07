@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Net.NetworkInformation;
 
 namespace BleSniffer;
 
@@ -9,6 +10,8 @@ public class BlePcapCapture
 
     public long TotalCapturedPackets { get; private set; }
     public long OutputFileSize { get; private set; }
+
+    public readonly Dictionary<PhysicalAddress, DateTime> DeviceHeartbeat = new();
 
     public BlePcapCapture(string device, string outputFile)
     {
@@ -32,10 +35,21 @@ public class BlePcapCapture
 
         while (ble.ReadPacket() is { } packet)
         {
-            if (packet.Length < 23)
+            if (packet.Length < 24 + 6)
                 continue;
 
             pcap.WriteBlePacket(sw.Elapsed, packet);
+
+            var macAddr = new PhysicalAddress(new[]
+            {
+                packet[28],
+                packet[27],
+                packet[26],
+                packet[25],
+                packet[24],
+                packet[23],
+            });
+            DeviceHeartbeat[macAddr] = DateTime.UtcNow;
 
             TotalCapturedPackets++;
             OutputFileSize = outputFileStream.Position;
