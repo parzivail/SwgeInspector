@@ -5,9 +5,6 @@ using Tmds.DBus;
 
 namespace HashtagChris.DotNetBlueZ
 {
-    public delegate Task GattCharacteristicEventHandlerAsync(GattCharacteristic sender,
-        GattCharacteristicValueEventArgs eventArgs);
-
     /// <summary>
     /// Adds events to IGattCharacteristic1.
     /// </summary>

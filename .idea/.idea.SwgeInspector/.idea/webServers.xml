@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="WebServers">
+    <option name="servers">
+      <webServer id="b391df8c-813c-4764-aad7-2a2bdbc6338b" name="rpi-slicer">
+        <fileTransfer rootFolder="/home/cnewman/deploy" accessType="SFTP" host="rpi-slicer.local" port="22" sshConfigId="39311f93-dd6a-4973-bb2f-9daef23bf872" sshConfig="cnewman@rpi-slicer.local:22 password">
+          <advancedOptions>
+            <advancedOptions dataProtectionLevel="Private" keepAliveTimeout="0" passiveMode="true" shareSSLContext="true" />
+          </advancedOptions>
+        </fileTransfer>
+      </webServer>
+    </option>
+  </component>
+</project>

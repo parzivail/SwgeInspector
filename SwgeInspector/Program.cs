@@ -6,7 +6,7 @@ using NavXMxp;
 
 namespace SwgeInspector;
 
-public class Program
+public class Program : IDisposable
 {
     private const string DeviceGps = "/dev/tty_gps";
     private const string DeviceBleSniffer = "/dev/tty_ble";
@@ -18,18 +18,27 @@ public class Program
     private readonly long _startTicks;
     private readonly BleServer _bleServer;
     private readonly BlePcapCapture _blePcapCapture;
+    private readonly GpsLogger _gpsLogger;
+    private readonly NavXLogger _navxLogger;
 
     private Program()
     {
         _startTicks = DateTime.UtcNow.Ticks;
-        _blePcapCapture = new BlePcapCapture(DeviceBleSniffer, $"ble_sniffer_{_startTicks}.pcap");
+
+        // _blePcapCapture = new BlePcapCapture(DeviceBleSniffer, $"ble_sniffer_{_startTicks}.pcap");
+        // _gpsLogger = new GpsLogger(DeviceGps, $"gps_{_startTicks}.bin");
+        // _navxLogger = new NavXLogger(DeviceImu, $"imu_{_startTicks}.bin");
+        _blePcapCapture = new BlePcapCapture(DeviceBleSniffer, $"/dev/null");
+        _gpsLogger = new GpsLogger(DeviceGps, $"/dev/null");
+        _navxLogger = new NavXLogger(DeviceImu, $"/dev/null");
+
         _bleServer = new BleServer(DeviceBluetooth, WriteGattData);
     }
 
     private void WriteGattData(BinaryWriter bw)
     {
-        bw.Write(0f); // Latitude
-        bw.Write(0f); // Longitude
+        bw.Write(_gpsLogger.Latitude); // Latitude
+        bw.Write(_gpsLogger.Longitude); // Longitude
         bw.Write((ushort)0); // Num Active Beacons
         bw.Write((ushort)0); // Num Total Beacons
         bw.Write(_blePcapCapture.TotalCapturedPackets); // Num Total Packets
@@ -39,7 +48,18 @@ public class Program
     {
         // Start BLE capture
         Console.WriteLine($"Starting BLE capture ({DeviceBleSniffer} => {_blePcapCapture.OutputFile})...");
-        new Thread(_blePcapCapture.Run).Start();
+        new Thread(_blePcapCapture.Run)
+        {
+            Name = "BLE Capture Thread"
+        }.Start();
+
+        // Start GPS logger
+        Console.WriteLine($"Starting GPS logger ({DeviceGps} => {_gpsLogger.OutputFile})...");
+        _gpsLogger.Run();
+
+        // Start IMU logger
+        Console.WriteLine($"Starting NavX logger ({DeviceImu} => {_navxLogger.OutputFile})...");
+        _navxLogger.Run();
 
         // Start BLE server
         Console.WriteLine($"Starting BLE server (adapter {DeviceBluetooth})...");
@@ -50,59 +70,14 @@ public class Program
 
     public static async Task Main(string[] args)
     {
-        // await BleDevice.Run();
-
         var program = new Program();
         await program.Run(args);
-
-        // NormalizeSerialDataRate(args[0]);
-        //
-        // using var socket = new SerialPort(args[0], 115200);
-        // socket.Open();
-        //
-        // socket.Write("$PMTK314,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0*28\r\n");
-        //
-        // var gps = new Gps(socket.BaseStream);
-        // gps.FixData += (gps1, data) =>
-        // {
-        // 	var latM = data.LatHemisphere == Hemisphere.South ? -1 : 1;
-        // 	var lonM = data.LonHemisphere == Hemisphere.West ? -1 : 1;
-        // 	Console.WriteLine($"{latM * (data.LatDeg + data.LatMin / 60)},{lonM * (data.LonDeg + data.LonMin / 60)}");
-        // };
-        //
-        // gps.Start();
-
-        // using var socket = new SerialPort("COM6", 57600);
-        // socket.Open();
-        //
-        // var navx = new NavX(socket.BaseStream);
-        // navx.Start();
     }
 
-    private static void NormalizeSerialDataRate(string port)
+    public void Dispose()
     {
-        using var socket = new SerialPort(port, 115200);
-        socket.Open();
-
-        var buffer = new byte[512];
-        socket.Read(buffer, 0, buffer.Length);
-        if (buffer.Any(b => b > 127))
-        {
-            // Device default baud rate is 9600 bps
-            socket.BaudRate = 9600;
-
-            socket.DiscardInBuffer();
-
-            // Set device baud rate to 115200 bps
-            socket.Write("$PMTK251,115200*1F\r\n");
-            socket.BaseStream.Flush();
-
-            socket.BaudRate = 115200;
-            socket.DiscardInBuffer();
-
-            Console.WriteLine("Update rate to 115200");
-        }
-
-        socket.Close();
+        _bleServer.Dispose();
+        _gpsLogger.Dispose();
+        _navxLogger.Dispose();
     }
 }

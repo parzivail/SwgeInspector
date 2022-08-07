@@ -6,10 +6,6 @@ using Tmds.DBus;
 
 namespace HashtagChris.DotNetBlueZ
 {
-    public delegate Task DeviceChangeEventHandlerAsync(Adapter sender, DeviceFoundEventArgs eventArgs);
-
-    public delegate Task AdapterEventHandlerAsync(Adapter sender, BlueZEventArgs eventArgs);
-
     /// <summary>
     /// Add events to IAdapter1.
     /// </summary>
