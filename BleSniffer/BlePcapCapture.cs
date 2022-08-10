@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net.NetworkInformation;
 
@@ -11,7 +12,7 @@ public class BlePcapCapture
     public long TotalCapturedPackets { get; private set; }
     public long OutputFileSize { get; private set; }
 
-    public readonly Dictionary<PhysicalAddress, DateTime> DeviceHeartbeat = new();
+    public readonly ConcurrentDictionary<PhysicalAddress, DateTime> DeviceHeartbeat = new();
 
     public BlePcapCapture(string device, string outputFile)
     {
