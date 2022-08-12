@@ -19,7 +19,7 @@ public class Program : IDisposable
 
     private readonly long _startTicks;
     private readonly BleServer _bleServer;
-    private readonly BlePcapCapture _blePcapCapture;
+    private readonly IBleCapture _bleCapture;
     private readonly GpsLogger _gpsLogger;
     private readonly NavXLogger _navxLogger;
 
@@ -27,9 +27,10 @@ public class Program : IDisposable
     {
         _startTicks = DateTime.UtcNow.Ticks;
 
-        _blePcapCapture = new BlePcapCapture(DeviceBleSniffer, $"ble_sniffer_{_startTicks}.pcap");
-        _gpsLogger = new GpsLogger(DeviceGps, $"gps_{_startTicks}.bin");
-        _navxLogger = new NavXLogger(DeviceImu, $"imu_{_startTicks}.bin");
+        Directory.CreateDirectory("captures");
+        _bleCapture = new BleDirectCapture(DeviceBleSniffer, $"captures/ble_sniffer_{_startTicks}.bin");
+        _gpsLogger = new GpsLogger(DeviceGps, $"captures/gps_{_startTicks}.bin");
+        _navxLogger = new NavXLogger(DeviceImu, $"captures/imu_{_startTicks}.bin");
 
         // _blePcapCapture = new BlePcapCapture(DeviceBleSniffer, $"/dev/null");
         // _gpsLogger = new GpsLogger(DeviceGps, $"/dev/null");
@@ -44,17 +45,16 @@ public class Program : IDisposable
 
         bw.Write(_gpsLogger.Latitude); // Latitude
         bw.Write(_gpsLogger.Longitude); // Longitude
-        bw.Write((ushort)_blePcapCapture.DeviceHeartbeat.Count(pair =>
-            pair.Value > tenSecondsAgo)); // Num Active Beacons
-        bw.Write((ushort)_blePcapCapture.DeviceHeartbeat.Count); // Num Total Beacons
-        bw.Write(_blePcapCapture.TotalCapturedPackets); // Num Total Packets
+        bw.Write((ushort)_bleCapture.DeviceHeartbeat.Count(pair => pair.Value > tenSecondsAgo)); // Num Active Beacons
+        bw.Write((ushort)_bleCapture.DeviceHeartbeat.Count); // Num Total Beacons
+        bw.Write(_bleCapture.TotalCapturedPackets); // Num Total Packets
     }
 
     private async Task Run(string[] args)
     {
         // Start BLE capture
-        Console.WriteLine($"Starting BLE capture ({DeviceBleSniffer} => {_blePcapCapture.OutputFile})...");
-        new Thread(_blePcapCapture.Run)
+        Console.WriteLine($"Starting BLE capture ({DeviceBleSniffer} => {_bleCapture.OutputFile})...");
+        new Thread(_bleCapture.Run)
         {
             Name = "BLE Capture Thread"
         }.Start();
@@ -71,6 +71,7 @@ public class Program : IDisposable
         Console.WriteLine($"Starting BLE server (adapter {DeviceBluetooth})...");
         await _bleServer.Start();
 
+        Console.WriteLine("Running");
         await Task.Delay(-1);
     }
 

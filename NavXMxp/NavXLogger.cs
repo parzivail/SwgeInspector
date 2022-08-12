@@ -29,6 +29,7 @@ public class NavXLogger : IDisposable
 
         navx.AhrsUpdate += (sender, data) =>
         {
+            bw.Write(DateTime.UtcNow.Ticks);
             bw.Write(data.Yaw);
             bw.Write(data.Pitch);
             bw.Write(data.Roll);

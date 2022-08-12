@@ -17,25 +17,31 @@ public class Program
             var utcMin = br.ReadInt32();
             var utcSec = br.ReadDouble();
 
-            var latDeg = br.ReadInt32();
-            var latMin = br.ReadDouble();
-            var latHemi = (Hemisphere)br.ReadByte();
+            var hasFix = br.ReadBoolean();
 
-            var lonDeg = br.ReadInt32();
-            var lonMin = br.ReadDouble();
-            var lonHemi = (Hemisphere)br.ReadByte();
+            if (hasFix)
+            {
+                var latDeg = br.ReadInt32();
+                var latMin = br.ReadDouble();
+                var latHemi = (Hemisphere)br.ReadByte();
 
-            var quality = (GpsQuality)br.ReadByte();
-            var numSatellites = br.ReadInt32();
-            var hdop = br.ReadDouble();
+                var lonDeg = br.ReadInt32();
+                var lonMin = br.ReadDouble();
+                var lonHemi = (Hemisphere)br.ReadByte();
 
-            var altGeoid = br.ReadDouble();
-            var altUnit = br.ReadChar();
+                var quality = (GpsQuality)br.ReadByte();
+                var numSatellites = br.ReadInt32();
+                var hdop = br.ReadDouble();
 
-            var geoidalSep = br.ReadDouble();
-            var geoidalSepUnit = br.ReadChar();
+                var altGeoid = br.ReadDouble();
+                var altUnit = br.ReadChar();
 
-            Console.WriteLine($"{utcHour:00}:{utcMin:00}:{utcSec:00.000000}");
+                var geoidalSep = br.ReadDouble();
+                var geoidalSepUnit = br.ReadChar();
+            }
+
+            Console.WriteLine(
+                $"DEVICE[{new DateTime(ticks, DateTimeKind.Utc):T}] ~ GPS[{utcHour:00}:{utcMin:00}:{utcSec:00.000000}] [{(hasFix ? "" : "no ")}fix]");
         }
     }
 }

@@ -12,10 +12,11 @@
     </ItemGroup>
 
     <ItemGroup>
-      <ProjectReference Include="..\BleBeacon\BleBeacon.csproj" />
-      <ProjectReference Include="..\BleSniffer\BleSniffer.csproj"/>
-      <ProjectReference Include="..\Mtk33x9Gps\Mtk33x9Gps.csproj" />
-      <ProjectReference Include="..\NavXMxp\NavXMxp.csproj" />
+        <ProjectReference Include="..\..\dotnet-ble-server\DotnetBleServer\DotnetBleServer.csproj"/>
+        <ProjectReference Include="..\BleSniffer\BleSniffer.csproj"/>
+        <ProjectReference Include="..\DotNet-BlueZ\DotNet-BlueZ.csproj"/>
+        <ProjectReference Include="..\Mtk33x9Gps\Mtk33x9Gps.csproj"/>
+        <ProjectReference Include="..\NavXMxp\NavXMxp.csproj"/>
     </ItemGroup>
 
 </Project>

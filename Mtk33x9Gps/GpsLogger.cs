@@ -35,6 +35,16 @@ public class GpsLogger : IDisposable
         _socket.Write("$PMTK314,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0*28\r\n");
 
         var gps = new Gps(_socket.BaseStream);
+
+        gps.NoFix += (gps1, utcHours, utcMinutes, utcSeconds) =>
+        {
+            bw.Write(DateTime.UtcNow.Ticks);
+            bw.Write(utcHours);
+            bw.Write(utcMinutes);
+            bw.Write(utcSeconds);
+            bw.Write(false);
+        };
+
         gps.FixData += (gps1, data) =>
         {
             var latM = data.LatHemisphere == Hemisphere.South ? -1 : 1;
@@ -47,6 +57,7 @@ public class GpsLogger : IDisposable
             bw.Write(data.UtcHours);
             bw.Write(data.UtcMin);
             bw.Write(data.UtcSec);
+            bw.Write(true);
 
             bw.Write(data.LatDeg);
             bw.Write(data.LatMin);

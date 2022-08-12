@@ -39,7 +39,10 @@ public class Gps
 
     public delegate void FixDataDelegate(Gps gps, GpsFixData data);
 
-    public event FixDataDelegate FixData;
+    public delegate void NoFixDelegate(Gps gps, int utcHours, int utcMinutes, double utcSeconds);
+
+    public event FixDataDelegate? FixData;
+    public event NoFixDelegate? NoFix;
 
     public Gps(Stream stream)
     {
@@ -110,12 +113,16 @@ public class Gps
                 // $GNGGA,190350.000,3013.0594,N,08137.3034,W,2,07,1.39,19.4,M,-31.6,M,,*74
 
                 var utcHours = int.Parse(sr.TakeString(2));
-                var utcMin = int.Parse(sr.TakeString(2));
+                var utcMinutes = int.Parse(sr.TakeString(2));
                 var utcSec = double.Parse(sr.TakeString(6));
                 sr.ReadChar(',');
                 if (sr.PeekChar() == ',')
+                {
                     // No fix
+                    gps.NoFix?.Invoke(gps, utcHours, utcMinutes, utcSec);
                     break;
+                }
+
                 var latDeg = int.Parse(sr.TakeString(2));
                 var latMin = double.Parse(sr.TakeString(7));
                 sr.ReadChar(',');
@@ -140,8 +147,8 @@ public class Gps
                 sr.ReadChar(',');
                 var geoidalSepUnit = sr.TakeChar();
 
-                gps.FixData.Invoke(gps, new GpsFixData(
-                    utcHours, utcMin, utcSec,
+                gps.FixData?.Invoke(gps, new GpsFixData(
+                    utcHours, utcMinutes, utcSec,
                     latDeg, latMin, Hemispheres[latHemisphere],
                     lonDeg, lonMin, Hemispheres[lonHemisphere],
                     quality, numSatellites, hdop,

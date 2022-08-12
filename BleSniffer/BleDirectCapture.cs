@@ -4,7 +4,7 @@ using System.Net.NetworkInformation;
 
 namespace BleSniffer;
 
-public class BlePcapCapture : IBleCapture
+public class BleDirectCapture : IBleCapture
 {
     public string Device { get; }
     public string OutputFile { get; }
@@ -15,7 +15,7 @@ public class BlePcapCapture : IBleCapture
     private readonly ConcurrentDictionary<PhysicalAddress, DateTime> _deviceHeartbeat = new();
     public ConcurrentDictionary<PhysicalAddress, DateTime> DeviceHeartbeat => _deviceHeartbeat;
 
-    public BlePcapCapture(string device, string outputFile)
+    public BleDirectCapture(string device, string outputFile)
     {
         Device = device;
         OutputFile = outputFile;
@@ -28,19 +28,20 @@ public class BlePcapCapture : IBleCapture
 
         using var outputFileStream = new FileStream(OutputFile, FileMode.Create, FileAccess.Write, FileShare.Read,
             4096, FileOptions.WriteThrough);
-        var pcap = new PcapFile(outputFileStream);
-
-        pcap.WriteHeader();
-
-        var sw = new Stopwatch();
-        sw.Start();
+        var bw = new BinaryWriter(outputFileStream);
 
         while (ble.ReadPacket() is { } packet)
         {
+            var utcNow = DateTime.UtcNow;
+
+            bw.Write(utcNow.Ticks);
+            bw.Write(packet.Length);
+            bw.Write(packet);
+
+            OutputFileSize = outputFileStream.Position;
+
             if (packet.Length < 24 + 6)
                 continue;
-
-            pcap.WriteBlePacket(sw.Elapsed, packet);
 
             var macAddr = new PhysicalAddress(new[]
             {
@@ -51,10 +52,9 @@ public class BlePcapCapture : IBleCapture
                 packet[24],
                 packet[23],
             });
-            _deviceHeartbeat[macAddr] = DateTime.UtcNow;
+            _deviceHeartbeat[macAddr] = utcNow;
 
             TotalCapturedPackets++;
-            OutputFileSize = outputFileStream.Position;
         }
     }
 }
