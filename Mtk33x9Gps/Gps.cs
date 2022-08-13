@@ -41,8 +41,11 @@ public class Gps
 
     public delegate void NoFixDelegate(Gps gps, int utcHours, int utcMinutes, double utcSeconds);
 
+    public delegate void RawDataDelegate(Gps gps, string sentence);
+
     public event FixDataDelegate? FixData;
     public event NoFixDelegate? NoFix;
+    public event RawDataDelegate? RawData;
 
     public Gps(Stream stream)
     {
@@ -198,7 +201,9 @@ public class Gps
             var line = _reader.ReadLine();
             if (line == null)
                 break;
-            ConsumeSentence(line);
+
+            RawData?.Invoke(this, line);
+            // ConsumeSentence(line);
         }
     }
 }

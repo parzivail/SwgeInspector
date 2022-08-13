@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO.Ports;
+using System.Text;
 
 namespace Mtk33x9Gps;
 
@@ -29,54 +30,60 @@ public class GpsLogger : IDisposable
 
         _socket.Open();
 
-        var bw = new BinaryWriter(_outStream);
+        var bw = new BinaryWriter(_outStream, Encoding.UTF8);
 
         // Enable all output
         _socket.Write("$PMTK314,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0*28\r\n");
 
         var gps = new Gps(_socket.BaseStream);
 
-        gps.NoFix += (gps1, utcHours, utcMinutes, utcSeconds) =>
+        gps.RawData += (gps1, sentence) =>
         {
             bw.Write(DateTime.UtcNow.Ticks);
-            bw.Write(utcHours);
-            bw.Write(utcMinutes);
-            bw.Write(utcSeconds);
-            bw.Write(false);
+            bw.Write(sentence);
         };
 
-        gps.FixData += (gps1, data) =>
-        {
-            var latM = data.LatHemisphere == Hemisphere.South ? -1 : 1;
-            var lonM = data.LonHemisphere == Hemisphere.West ? -1 : 1;
-
-            Latitude = (float)(latM * (data.LatDeg + data.LatMin / 60));
-            Longitude = (float)(lonM * (data.LonDeg + data.LonMin / 60));
-
-            bw.Write(DateTime.UtcNow.Ticks);
-            bw.Write(data.UtcHours);
-            bw.Write(data.UtcMin);
-            bw.Write(data.UtcSec);
-            bw.Write(true);
-
-            bw.Write(data.LatDeg);
-            bw.Write(data.LatMin);
-            bw.Write((byte)data.LatHemisphere);
-
-            bw.Write(data.LonDeg);
-            bw.Write(data.LonMin);
-            bw.Write((byte)data.LonHemisphere);
-
-            bw.Write((byte)data.Quality);
-            bw.Write(data.NumSatellites);
-            bw.Write(data.Hdop);
-
-            bw.Write(data.AltGeoid);
-            bw.Write(data.AltUnit);
-
-            bw.Write(data.GeoidalSep);
-            bw.Write(data.GeoidalSepUnit);
-        };
+        // gps.NoFix += (gps1, utcHours, utcMinutes, utcSeconds) =>
+        // {
+        //     bw.Write(DateTime.UtcNow.Ticks);
+        //     bw.Write(utcHours);
+        //     bw.Write(utcMinutes);
+        //     bw.Write(utcSeconds);
+        //     bw.Write(false);
+        // };
+        //
+        // gps.FixData += (gps1, data) =>
+        // {
+        //     var latM = data.LatHemisphere == Hemisphere.South ? -1 : 1;
+        //     var lonM = data.LonHemisphere == Hemisphere.West ? -1 : 1;
+        //
+        //     Latitude = (float)(latM * (data.LatDeg + data.LatMin / 60));
+        //     Longitude = (float)(lonM * (data.LonDeg + data.LonMin / 60));
+        //
+        //     bw.Write(DateTime.UtcNow.Ticks);
+        //     bw.Write(data.UtcHours);
+        //     bw.Write(data.UtcMin);
+        //     bw.Write(data.UtcSec);
+        //     bw.Write(true);
+        //
+        //     bw.Write(data.LatDeg);
+        //     bw.Write(data.LatMin);
+        //     bw.Write((byte)data.LatHemisphere);
+        //
+        //     bw.Write(data.LonDeg);
+        //     bw.Write(data.LonMin);
+        //     bw.Write((byte)data.LonHemisphere);
+        //
+        //     bw.Write((byte)data.Quality);
+        //     bw.Write(data.NumSatellites);
+        //     bw.Write(data.Hdop);
+        //
+        //     bw.Write(data.AltGeoid);
+        //     bw.Write(data.AltUnit);
+        //
+        //     bw.Write(data.GeoidalSep);
+        //     bw.Write(data.GeoidalSepUnit);
+        // };
 
         gps.Start();
     }
