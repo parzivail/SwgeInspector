@@ -1,47 +1,77 @@
+using BleSniffer;
 using Mtk33x9Gps;
 
 namespace Unpacker;
 
 public class Program
 {
-    public static void Main(string[] args)
-    {
-        using var file = File.OpenRead(args[0]);
-        var br = new BinaryReader(file);
+	public static void Main(string[] args)
+	{
+		using var file = File.OpenRead(args[0]);
+		var br = new BinaryReader(file);
 
-        while (file.Position < file.Length)
-        {
-            var ticks = br.ReadInt64();
+		using var f = File.OpenWrite(args[0] + ".pcap");
+		var pcap = new PcapFile(f);
+		pcap.WriteHeader();
 
-            var utcHour = br.ReadInt32();
-            var utcMin = br.ReadInt32();
-            var utcSec = br.ReadDouble();
+		var firstTimestamp = DateTime.MinValue;
 
-            var hasFix = br.ReadBoolean();
+		while (file.Position < file.Length)
+		{
+			try
+			{
+				var ticks = br.ReadInt64();
+				var dt = new DateTime(ticks);
 
-            if (hasFix)
-            {
-                var latDeg = br.ReadInt32();
-                var latMin = br.ReadDouble();
-                var latHemi = (Hemisphere)br.ReadByte();
+				if (firstTimestamp == DateTime.MinValue)
+					firstTimestamp = dt;
 
-                var lonDeg = br.ReadInt32();
-                var lonMin = br.ReadDouble();
-                var lonHemi = (Hemisphere)br.ReadByte();
+				var blePacketlength = br.ReadInt32();
+				var blePacket = br.ReadBytes(blePacketlength);
 
-                var quality = (GpsQuality)br.ReadByte();
-                var numSatellites = br.ReadInt32();
-                var hdop = br.ReadDouble();
+				if (blePacketlength > 22)
+					pcap.WriteBlePacket(dt - firstTimestamp, blePacket);
+			}
+			catch
+			{
+				break;
+			}
+		}
+	}
 
-                var altGeoid = br.ReadDouble();
-                var altUnit = br.ReadChar();
+	public static void MainGps(string[] args)
+	{
+		using var file = File.OpenRead(args[0]);
+		var br = new BinaryReader(file);
 
-                var geoidalSep = br.ReadDouble();
-                var geoidalSepUnit = br.ReadChar();
-            }
+		var gps = new Gps(null);
 
-            Console.WriteLine(
-                $"DEVICE[{new DateTime(ticks, DateTimeKind.Utc):T}] ~ GPS[{utcHour:00}:{utcMin:00}:{utcSec:00.000000}] [{(hasFix ? "" : "no ")}fix]");
-        }
-    }
+		using var f = File.OpenWrite(args[0] + "_ll.bin");
+		var bw = new BinaryWriter(f);
+
+		gps.FixData += (gps1, data) =>
+		{
+			var latM = data.LatHemisphere == Hemisphere.South ? -1 : 1;
+			var lonM = data.LonHemisphere == Hemisphere.West ? -1 : 1;
+			var latitude = (float)(latM * (data.LatDeg + data.LatMin / 60));
+			var longitude = (float)(lonM * (data.LonDeg + data.LonMin / 60));
+
+			bw.Write(latitude);
+			bw.Write(longitude);
+		};
+
+		while (file.Position < file.Length)
+		{
+			try
+			{
+				var ticks = br.ReadInt64();
+				var sentence = br.ReadString();
+				gps.ConsumeSentence(sentence);
+			}
+			catch
+			{
+				break;
+			}
+		}
+	}
 }
