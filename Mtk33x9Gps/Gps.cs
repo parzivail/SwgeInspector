@@ -14,7 +14,7 @@ public class Gps
 		["GN"] = Talker.Gnss
 	};
 
-	private static readonly Dictionary<char, Hemisphere> Hemispheres = new()
+	public static readonly Dictionary<char, Hemisphere> Hemispheres = new()
 	{
 		['N'] = Hemisphere.North,
 		['S'] = Hemisphere.South,

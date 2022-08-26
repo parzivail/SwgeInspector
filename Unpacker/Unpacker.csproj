@@ -8,8 +8,13 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <ProjectReference Include="..\BleSniffer\BleSniffer.csproj"/>
-        <ProjectReference Include="..\Mtk33x9Gps\Mtk33x9Gps.csproj"/>
+        <ProjectReference Include="..\BleSniffer\BleSniffer.csproj" />
+        <ProjectReference Include="..\Mtk33x9Gps\Mtk33x9Gps.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <PackageReference Include="SixLabors.ImageSharp" Version="2.1.3" />
+      <PackageReference Include="SixLabors.ImageSharp.Drawing" Version="1.0.0-beta15" />
     </ItemGroup>
 
 </Project>
