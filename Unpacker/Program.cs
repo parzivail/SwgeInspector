@@ -1,5 +1,6 @@
 using System.Net.NetworkInformation;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using BleSniffer;
 using Microsoft.IO;
@@ -118,6 +119,35 @@ public record MapObjectDataEntry(
     IReadOnlyList<string> InstallationIds
 );
 
+public enum AppDataOpcode : byte
+{
+    Connect = 0x01,
+    Data = 0x02,
+    Disconnect = 0x03
+}
+
+public record InteropPacket(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("timestamp")]
+    DateTime Timestamp,
+    [property: JsonPropertyName("payload")]
+    JsonObject Payload
+);
+
+public record PdpRequest(
+    [property: JsonPropertyName("requestType")]
+    string? RequestType,
+    [property: JsonPropertyName("payload")]
+    object? Payload
+);
+
+public record PdpBeaconPayload(
+    [property: JsonPropertyName("name")] string? Name,
+    [property: JsonPropertyName("experienceName")]
+    string? ExperienceName,
+    [property: JsonPropertyName("rssi")] int Rssi
+);
+
 public class Program
 {
     private const double OSM_T = 28.35546;
@@ -152,6 +182,7 @@ public class Program
 
     public static void Main(string[] args)
     {
+        Console.WriteLine("Loading GPS data");
         // Load GPS data
         using var gpsStream = File.OpenRead("/home/cnewman/Documents/gps_637956226262456597.bin");
         var gps = new BinaryReader(gpsStream);
@@ -173,6 +204,7 @@ public class Program
             // ignored
         }
 
+        Console.WriteLine("Synchronizing system timestamps");
         // Synchronize GPS and system time
         var trueDate = new DateOnly(2022, 8, 22);
         var trueTime = gpsPings[0].Data.UtcTime;
@@ -183,6 +215,7 @@ public class Program
         var gpsInterpolator =
             new GpsInterpolator(gpsPings.Select(o => o with { Timestamp = o.Timestamp + timeOffset }).ToArray());
 
+        Console.WriteLine("Loading BLE data");
         // Load BLE data
         using var bleStream =
             File.OpenRead("/home/cnewman/Documents/ble_sniffer_637956226262456597.bin");
@@ -205,6 +238,7 @@ public class Program
             // ignored
         }
 
+        Console.WriteLine("Creating PCAP packets");
         // Create PCAP-compatible packets
         var packets = new List<GpsAndTimestampedObject<byte[]>>();
 
@@ -235,6 +269,41 @@ public class Program
             packets.Add(new GpsAndTimestampedObject<byte[]>(time, gpsLocation, packet));
         }
 
+        Console.WriteLine("Loading interop data");
+        // Load interop packet data
+        using var fs = File.OpenRead("/home/cnewman/Documents/pdp_interop_packets.bin");
+        var br = new BinaryReader(fs);
+
+        var interopPacketData = new List<GpsAndTimestampedObject<string>>();
+
+        try
+        {
+            while (true)
+            {
+                var timestamp = new DateTime(br.ReadInt64(), DateTimeKind.Utc);
+                var opcode = (AppDataOpcode)br.ReadByte();
+                if (opcode == AppDataOpcode.Data)
+                {
+                    var packet = JsonSerializer.Deserialize<InteropPacket>(br.ReadString());
+                    var data = packet?.Payload.Deserialize<PdpRequest>();
+                    if (data?.Payload is not JsonElement { ValueKind: JsonValueKind.Object } payload)
+                        continue;
+
+                    if (data is not { RequestType: "SHOW_CONTROL_EFFECT_IN_RANGE" or "SHOW_CONTROL_EFFECT_READY" or "BEACON_GAME_ADVANCE_IN_RANGE" }) continue;
+
+                    var beaconPayload = payload.Deserialize<PdpBeaconPayload>();
+                    if (beaconPayload.Rssi > -75)
+                        interopPacketData.Add(new GpsAndTimestampedObject<string>(timestamp, gpsInterpolator.GetPosition(timestamp),
+                            beaconPayload.Name ?? beaconPayload.ExperienceName));
+                }
+            }
+        }
+        catch (EndOfStreamException)
+        {
+            // ignored
+        }
+
+        Console.WriteLine("Loading Datapad data");
         // Load Datapad beacon definitions
         var beaconData = JsonSerializer.Deserialize<Dictionary<string, BeaconDataEntry>>(
             File.ReadAllText("/home/cnewman/Documents/starWarsGalaxysEdgeGame_91_beacon-data.json")
@@ -246,6 +315,7 @@ public class Program
             File.ReadAllText("/home/cnewman/Documents/starWarsGalaxysEdgeGame_91_map-object-data-wdw.json")
         ).Select(pair => pair.Value).ToDictionary(entry => entry.Id, entry => entry);
 
+        Console.WriteLine("Loading images and fonts");
         // Load images
         // var wdwMap = Image.Load<Rgba32>("/home/cnewman/Documents/map-wdw.png");
         var osmMap = Image.Load<Rgba32>("/home/cnewman/Documents/osm_map_no_text.png");
@@ -257,77 +327,109 @@ public class Program
 
         const int targetBeacon = 0xA5;
 
-        var beaconPos = new Dictionary<int, (double X, double Y)>();
+        Console.WriteLine("Mapping beacons and waypoints");
+        var waypointToLocationMap = new Dictionary<int, (double X, double Y)>();
+        var nameToLocationMap = new Dictionary<string, (double X, double Y)>();
         foreach (var (id, entry) in mapObjectData.Where(pair => pair.Value.Type == "BeaconMarker"))
         {
             var pos = mapLocationData[entry.LocationId];
             var data = beaconData[entry.BeaconId];
-            beaconPos[data.WaypointId] = new ValueTuple<double, double>(pos.X, pos.Y);
+            waypointToLocationMap[data.WaypointId] = nameToLocationMap[data.PlayExperienceNameWDW] = new ValueTuple<double, double>(pos.X, pos.Y);
         }
 
-        foreach (var (time, pos, packet) in packets)
+        osmMap.Mutate(context =>
         {
-            if (pos.SatelliteCount < 10)
-                continue;
-
-            var rssi = -packet[10];
-            var macAddr = new PhysicalAddress(new[]
+            Console.WriteLine("Plotting BLE packets");
+            foreach (var (time, pos, packet) in packets)
             {
-                packet[28],
-                packet[27],
-                packet[26],
-                packet[25],
-                packet[24],
-                packet[23],
-            });
+                if (pos.SatelliteCount < 10)
+                    continue;
 
-            var adManufacturer = (packet[35] << 8) | packet[34];
-            if (adManufacturer != 0x183) // Walt Disney
-                continue;
+                var rssi = -packet[10];
+                var macAddr = new PhysicalAddress(new[]
+                {
+                    packet[28],
+                    packet[27],
+                    packet[26],
+                    packet[25],
+                    packet[24],
+                    packet[23],
+                });
 
-            var advertType = (packet[36] << 8) | packet[37];
-            if (advertType != 0x1004) // Beacon
-                continue;
+                var adManufacturer = (packet[35] << 8) | packet[34];
+                if (adManufacturer != 0x183) // Walt Disney
+                    continue;
 
-            var beaconId = packet[40];
+                var advertType = (packet[36] << 8) | packet[37];
+                if (advertType != 0x1004) // Location Beacon
+                    continue;
 
-            // if (beaconId != targetBeacon)
-            //     continue;
+                var beaconId = packet[40];
 
-            var (x, y) = LatLonToOsmMapPoint(pos.Longitude, pos.Latitude);
-            var pt = new PointF((float)(x * osmMap.Width), (float)(y * osmMap.Height));
-            osmMap.Mutate(context =>
-            {
-                if (beaconPos.TryGetValue(beaconId, out var entry))
+                // if (beaconId != targetBeacon)
+                //     continue;
+
+                var (x, y) = LatLonToOsmMapPoint(pos.Longitude, pos.Latitude);
+                if (x > 1 || y > 1 || x < 0 || y < 0)
+                    continue;
+                var pt = new PointF((float)(x * osmMap.Width), (float)(y * osmMap.Height));
+
+                if (waypointToLocationMap.TryGetValue(beaconId, out var entry))
                 {
                     var (sx, sy) = WdwMapPointToOsmMapPoint(entry.X, entry.Y);
                     var spt = new PointF((float)(sx * osmMap.Width), (float)(sy * osmMap.Height));
 
-                    context.DrawLines(Color.Black, 1, pt, spt);
+                    context.DrawLines(Color.Black.WithAlpha(0.1f), 1, pt, spt);
+                    context.Fill(Color.Blue, new EllipsePolygon(pt, 3));
                 }
+                else
+                    context.Fill(Color.Cyan, new EllipsePolygon(pt, 3));
 
-                context.Fill(Color.Blue, new EllipsePolygon(pt, 3));
                 // context.DrawText($"{beaconId} 0x{beaconId:X}", font, Color.Black, pt);
-            });
-        }
+            }
 
-        // Draw Datapad beacons
-        foreach (var (id, entry) in mapObjectData.Where(pair => pair.Value.Type == "BeaconMarker"))
-        {
-            var pos = mapLocationData[entry.LocationId];
-            var data = beaconData[entry.BeaconId];
-
-            var (x, y) = WdwMapPointToOsmMapPoint(pos.X, pos.Y);
-            var pt = new PointF((float)(x * osmMap.Width), (float)(y * osmMap.Height));
-
-            osmMap.Mutate(context =>
+            Console.WriteLine("Plotting interop packets");
+            foreach (var (time, pos, beaconName) in interopPacketData)
             {
+                if (pos.SatelliteCount < 10)
+                    continue;
+
+                var (x, y) = LatLonToOsmMapPoint(pos.Longitude, pos.Latitude);
+                if (x > 1 || y > 1 || x < 0 || y < 0)
+                    continue;
+                var pt = new PointF((float)(x * osmMap.Width), (float)(y * osmMap.Height));
+
+                if (nameToLocationMap.TryGetValue(beaconName, out var beaconLocation))
+                {
+                    var (sx, sy) = WdwMapPointToOsmMapPoint(beaconLocation.X, beaconLocation.Y);
+                    var spt = new PointF((float)(sx * osmMap.Width), (float)(sy * osmMap.Height));
+
+                    context.DrawLines(Color.Black.WithAlpha(0.1f), 1, pt, spt);
+                    context.Fill(Color.Orange, new EllipsePolygon(pt, 3));
+                }
+                else
+                    context.Fill(Color.Yellow, new EllipsePolygon(pt, 3));
+
+                // context.DrawText($"{beaconId} 0x{beaconId:X}", font, Color.Black, pt);
+            }
+
+            Console.WriteLine("Plotting beacons");
+            // Draw Datapad beacons
+            foreach (var (id, entry) in mapObjectData.Where(pair => pair.Value.Type == "BeaconMarker"))
+            {
+                var pos = mapLocationData[entry.LocationId];
+                var data = beaconData[entry.BeaconId];
+
+                var (x, y) = WdwMapPointToOsmMapPoint(pos.X, pos.Y);
+                var pt = new PointF((float)(x * osmMap.Width), (float)(y * osmMap.Height));
+
                 var bWaypoint = (byte)data.WaypointId;
                 context.Fill(Color.Red, new EllipsePolygon(pt, 3));
                 context.DrawText($"{data.Name}\n{data.WaypointId} 0x{data.WaypointId:X}", font, Color.Black, pt);
-            });
-        }
+            }
+        });
 
+        Console.WriteLine("Exporting image");
         osmMap.Save("/home/cnewman/Documents/osm_map_beacons.png");
     }
 
