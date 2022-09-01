@@ -148,35 +148,32 @@ public record PdpBeaconPayload(
     [property: JsonPropertyName("rssi")] int Rssi
 );
 
+public record MapExtent(double Left, double Top, double Right, double Bottom);
+
 public class Program
 {
-    private const double OSM_T = 28.35546;
-    private const double OSM_B = 28.35309;
-    private const double OSM_L = -81.56299;
-    private const double OSM_R = -81.55967;
-
-    private const double WDW_T = 28.35570;
-    private const double WDW_B = 28.35334;
-    private const double WDW_L = -81.56279;
-    private const double WDW_R = -81.55983;
+    private static readonly MapExtent OsmSwge = new(-81.56299, 28.35546, -81.55967, 28.35309);
+    private static readonly MapExtent OsmDroidbath = new(-81.56247, 28.35465, -81.56209, 28.35435);
+    private static readonly MapExtent OsmMarket = new(-81.56169, 28.35452, -81.56105, 28.35421);
+    private static readonly MapExtent Wdw = new(-81.56279, 28.35570, -81.55983, 28.35334);
 
     private static double Remap(double t, double a, double b, double x, double y)
     {
         return (t - a) / (b - a) * (y - x) + x;
     }
 
-    private static (double X, double Y) WdwMapPointToOsmMapPoint(double x, double y)
+    private static (double X, double Y) WdwMapPointToOsmMapPoint(double x, double y, MapExtent target)
     {
-        var wdwLon = Remap(x, 0, 1, WDW_L, WDW_R);
-        var wdwLat = Remap(y, 0, 1, WDW_T, WDW_B);
-        return LatLonToOsmMapPoint(wdwLon, wdwLat);
+        var wdwLon = Remap(x, 0, 1, Wdw.Left, Wdw.Right);
+        var wdwLat = Remap(y, 0, 1, Wdw.Top, Wdw.Bottom);
+        return LatLonToOsmMapPoint(wdwLon, wdwLat, target);
     }
 
-    private static (double X, double Y) LatLonToOsmMapPoint(double wdwLon, double wdwLat)
+    private static (double X, double Y) LatLonToOsmMapPoint(double wdwLon, double wdwLat, MapExtent target)
     {
         return (
-            Remap(wdwLon, OSM_L, OSM_R, 0, 1),
-            Remap(wdwLat, OSM_T, OSM_B, 0, 1)
+            Remap(wdwLon, target.Left, target.Right, 0, 1),
+            Remap(wdwLat, target.Top, target.Bottom, 0, 1)
         );
     }
 
@@ -319,6 +316,7 @@ public class Program
         // Load images
         // var wdwMap = Image.Load<Rgba32>("/home/cnewman/Documents/map-wdw.png");
         var osmMap = Image.Load<Rgba32>("/home/cnewman/Documents/osm_map_no_text.png");
+        var targetMap = OsmSwge;
 
         // Setup fonts
         var collection = new FontCollection();
@@ -336,6 +334,8 @@ public class Program
             var data = beaconData[entry.BeaconId];
             waypointToLocationMap[data.WaypointId] = nameToLocationMap[data.PlayExperienceNameWDW] = new ValueTuple<double, double>(pos.X, pos.Y);
         }
+
+        var waypointMacMap = new Dictionary<int, HashSet<string>>();
 
         osmMap.Mutate(context =>
         {
@@ -369,14 +369,18 @@ public class Program
                 // if (beaconId != targetBeacon)
                 //     continue;
 
-                var (x, y) = LatLonToOsmMapPoint(pos.Longitude, pos.Latitude);
+                if (!waypointMacMap.ContainsKey(beaconId))
+                    waypointMacMap[beaconId] = new HashSet<string>();
+                waypointMacMap[beaconId].Add(macAddr.ToString());
+
+                var (x, y) = LatLonToOsmMapPoint(pos.Longitude, pos.Latitude, targetMap);
                 if (x > 1 || y > 1 || x < 0 || y < 0)
                     continue;
                 var pt = new PointF((float)(x * osmMap.Width), (float)(y * osmMap.Height));
 
                 if (waypointToLocationMap.TryGetValue(beaconId, out var entry))
                 {
-                    var (sx, sy) = WdwMapPointToOsmMapPoint(entry.X, entry.Y);
+                    var (sx, sy) = WdwMapPointToOsmMapPoint(entry.X, entry.Y, targetMap);
                     var spt = new PointF((float)(sx * osmMap.Width), (float)(sy * osmMap.Height));
 
                     context.DrawLines(Color.Black.WithAlpha(0.1f), 1, pt, spt);
@@ -388,20 +392,34 @@ public class Program
                 // context.DrawText($"{beaconId} 0x{beaconId:X}", font, Color.Black, pt);
             }
 
+            Console.WriteLine(
+                $"Beacon MAC map ({waypointMacMap.Count} waypoints, {waypointMacMap.Values.SelectMany(set => set).Distinct().Count()} physical addresses)");
+            Console.WriteLine("| Beacon | Physical Address |");
+            Console.WriteLine("| --- | --- |");
+
+            foreach (var (waypoint, macs) in waypointMacMap)
+            {
+                var beacon = beaconData.Values.FirstOrDefault(entry => entry.WaypointId == waypoint);
+                if (beacon == null)
+                    Console.WriteLine($"\t| <orphan 0x{waypoint:X2}> | {string.Join(", ", macs)} |");
+                else
+                    Console.WriteLine($"\t| {beacon.Name} | {string.Join(", ", macs)} |");
+            }
+
             Console.WriteLine("Plotting interop packets");
-            foreach (var (time, pos, beaconName) in interopPacketData)
+            foreach (var (time, pos, beaconName) in interopPacketData.Take(0))
             {
                 if (pos.SatelliteCount < 10)
                     continue;
 
-                var (x, y) = LatLonToOsmMapPoint(pos.Longitude, pos.Latitude);
+                var (x, y) = LatLonToOsmMapPoint(pos.Longitude, pos.Latitude, targetMap);
                 if (x > 1 || y > 1 || x < 0 || y < 0)
                     continue;
                 var pt = new PointF((float)(x * osmMap.Width), (float)(y * osmMap.Height));
 
                 if (nameToLocationMap.TryGetValue(beaconName, out var beaconLocation))
                 {
-                    var (sx, sy) = WdwMapPointToOsmMapPoint(beaconLocation.X, beaconLocation.Y);
+                    var (sx, sy) = WdwMapPointToOsmMapPoint(beaconLocation.X, beaconLocation.Y, targetMap);
                     var spt = new PointF((float)(sx * osmMap.Width), (float)(sy * osmMap.Height));
 
                     context.DrawLines(Color.Black.WithAlpha(0.1f), 1, pt, spt);
@@ -420,12 +438,12 @@ public class Program
                 var pos = mapLocationData[entry.LocationId];
                 var data = beaconData[entry.BeaconId];
 
-                var (x, y) = WdwMapPointToOsmMapPoint(pos.X, pos.Y);
+                var (x, y) = WdwMapPointToOsmMapPoint(pos.X, pos.Y, targetMap);
                 var pt = new PointF((float)(x * osmMap.Width), (float)(y * osmMap.Height));
 
                 var bWaypoint = (byte)data.WaypointId;
                 context.Fill(Color.Red, new EllipsePolygon(pt, 3));
-                context.DrawText($"{data.Name}\n{data.WaypointId} 0x{data.WaypointId:X}", font, Color.Black, pt);
+                context.DrawText($"{data.Name}", font, Color.Black, pt);
             }
         });
 
