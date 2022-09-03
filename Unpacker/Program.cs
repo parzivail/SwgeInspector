@@ -150,6 +150,70 @@ public record PdpBeaconPayload(
 
 public record MapExtent(double Left, double Top, double Right, double Bottom);
 
+public class DeviceParser
+{
+    public enum DroidPersonality : int
+    {
+        UnchippedR = 1,
+        UnchippedBb = 2,
+        Blue = 3,
+        Gray = 4,
+        Red = 5,
+        Orange = 6,
+        Purple = 7,
+        Black = 8
+    }
+
+    public enum DroidAffiliation : int
+    {
+        Scoundrel = 1,
+        Resistance = 5,
+        FirstOrder = 9
+    }
+
+    public static string ParseDroid(byte[] data)
+    {
+        var unknown1 = data[0];
+
+        var flags = data[1];
+        const int flagIsPaired = 0b10000000;
+        const int flagUnknown = 0b00000001;
+        var isPaired = (flags & flagIsPaired) != 0;
+
+        var bitmask = data[2];
+        const int bitmaskUnknown1 = 0b00000001;
+        const int bitmaskAffiliation = 0b01111110;
+        const int bitmaskUnknown2 = 0b10000000;
+        var unknown2 = (bitmask & bitmaskUnknown1);
+        var affiliation = (DroidAffiliation)((bitmask & bitmaskAffiliation) >> 1);
+        var unknown3 = (bitmask & bitmaskUnknown2) >> 7;
+
+        var personality = (DroidPersonality)data[3];
+
+        return $"Droid[Paired={isPaired}, Affiliation={affiliation}, Personality={personality}, X1={unknown1:X1}, X2={unknown2:X1}, X3={unknown3:X1}]";
+    }
+
+    public static string ParseDroidReactionBeacon(byte[] data)
+    {
+        var zone = data[0];
+        var reactionInterval = data[1] * 5;
+        var minRssi = (sbyte)data[2];
+        var unknown = data[3];
+
+        return $"DroidReactionBeacon[Zone={zone}, ReactionInterval={reactionInterval}s, MinRssi={minRssi}, X1={unknown:X1}]";
+    }
+
+    public static string ParseLocationBeacon(byte[] data)
+    {
+        var unknown1 = data[0];
+        var unknown2 = data[1];
+        var waypointId = data[2];
+        var minRssi = (sbyte)data[3];
+
+        return $"LocationBeacon[WaypointId={waypointId}, MinRssi={minRssi}, X1={unknown1:X1}, X2={unknown2:X1}]";
+    }
+}
+
 public class Program
 {
     private static readonly MapExtent OsmSwge = new(-81.56299, 28.35546, -81.55967, 28.35309);
@@ -177,7 +241,161 @@ public class Program
         );
     }
 
-    public static void Main(string[] args)
+    public static void Main /*DumpAllAdTypes*/(string[] args)
+    {
+        Console.WriteLine("Loading GPS data");
+        // Load GPS data
+        using var gpsStream = File.OpenRead("/home/cnewman/Documents/gps_637956226262456597.bin");
+        var gps = new BinaryReader(gpsStream);
+        var gpsPings = new List<TimestampedObject<GpsPosition>>();
+
+        try
+        {
+            while (true)
+            {
+                var timestamp = new DateTime(gps.ReadInt64());
+                var sentence = gps.ReadString();
+                var parsedSentence = ParseSentence(sentence);
+                if (parsedSentence != null)
+                    gpsPings.Add(new TimestampedObject<GpsPosition>(timestamp, parsedSentence));
+            }
+        }
+        catch (EndOfStreamException)
+        {
+            // ignored
+        }
+
+        Console.WriteLine("Synchronizing system timestamps");
+        // Synchronize GPS and system time
+        var trueDate = new DateOnly(2022, 8, 22);
+        var trueTime = gpsPings[0].Data.UtcTime;
+        var trueTimestamp = trueDate.ToDateTime(trueTime, DateTimeKind.Utc);
+        var localTimestamp = gpsPings[0].Timestamp;
+        var timeOffset = trueTimestamp - localTimestamp;
+
+        Console.WriteLine("Loading BLE data");
+        // Load BLE data
+        using var bleStream =
+            File.OpenRead("/home/cnewman/Documents/ble_sniffer_637956226262456597.bin");
+        var ble = new BinaryReader(bleStream);
+        var rawPackets = new List<TimestampedObject<byte[]>>();
+
+        try
+        {
+            while (true)
+            {
+                var timestamp = new DateTime(ble.ReadInt64()) + timeOffset;
+                var packetLength = ble.ReadInt32();
+                var data = ble.ReadBytes(packetLength);
+
+                rawPackets.Add(new TimestampedObject<byte[]>(timestamp, data));
+            }
+        }
+        catch (EndOfStreamException)
+        {
+            // ignored
+        }
+
+        Console.WriteLine("Creating PCAP packets");
+        // Create PCAP-compatible packets
+        var packets = new List<TimestampedObject<byte[]>>();
+
+        using var sw = new StreamWriter("/home/cnewman/Documents/ble_extracted_payloads_by_mac.txt");
+
+        var dict = new Dictionary<long, HashSet<string>>();
+
+        var manager = new RecyclableMemoryStreamManager();
+        foreach (var (time, data) in rawPackets)
+        {
+            if (data.Length <= 35)
+                continue;
+
+            using var stream = manager.GetStream();
+            var bw = new BinaryWriter(stream);
+
+            bw.Write((byte)0x04);
+            data[1]--;
+            bw.Write(data[..22]);
+            bw.Write(data[23..]);
+
+            var packet = stream.ToArray();
+
+            const int flagCrcOk = 0b1;
+
+            var flags = packet[8];
+            if ((flags & flagCrcOk) == 0)
+                continue;
+
+            packets.Add(new TimestampedObject<byte[]>(time, packet));
+        }
+
+        foreach (var (time, packet) in packets)
+        {
+            var rssi = -packet[10];
+            var macAddr = new byte[]
+            {
+                0,
+                0,
+                packet[28],
+                packet[27],
+                packet[26],
+                packet[25],
+                packet[24],
+                packet[23]
+            };
+
+            var adManufacturer = (packet[35] << 8) | packet[34];
+            if (adManufacturer != 0x183) // Walt Disney
+                continue;
+
+            const int adTypeAndMfrIdSize = 3;
+            var adLength = packet[32] - adTypeAndMfrIdSize;
+            var ad = packet[36..(36 + adLength)];
+
+            var stream = manager.GetStream(ad);
+            var br = new BinaryReader(stream);
+
+            while (stream.Position != stream.Length)
+            {
+                var deviceType = br.ReadByte();
+                var payloadLength = br.ReadByte();
+                var payload = br.ReadBytes(payloadLength);
+
+                var str = $"{deviceType:X2} {payloadLength:X2} {Convert.ToHexString(payload)}";
+
+                switch (deviceType)
+                {
+                    case 0x03:
+                        str += $" {DeviceParser.ParseDroid(payload)}";
+                        break;
+                    case 0x0A:
+                        str += $" {DeviceParser.ParseDroidReactionBeacon(payload)}";
+                        break;
+                    case 0x10:
+                        str += $" {DeviceParser.ParseLocationBeacon(payload)}";
+                        break;
+                }
+
+                var macLong = BitConverter.ToInt64(macAddr);
+                if (!dict.ContainsKey(macLong))
+                    dict[macLong] = new HashSet<string>();
+
+                dict[macLong].Add(str);
+            }
+        }
+
+        foreach (var (macLong, payloads) in dict)
+        {
+            var mac = BitConverter.GetBytes(macLong)[2..];
+
+            sw.WriteLine($"{string.Join(":", mac.Select(b => $"{b:X2}"))}");
+            foreach (var payload in payloads.OrderBy(s => s))
+                sw.WriteLine($"\t{payload}");
+            sw.WriteLine();
+        }
+    }
+
+    public static void MainImage(string[] args)
     {
         Console.WriteLine("Loading GPS data");
         // Load GPS data
@@ -247,7 +465,7 @@ public class Program
 
             var gpsLocation = gpsInterpolator.GetPosition(time);
 
-            var stream = manager.GetStream();
+            using var stream = manager.GetStream();
             var bw = new BinaryWriter(stream);
 
             bw.Write((byte)0x04);
@@ -337,6 +555,8 @@ public class Program
 
         var waypointMacMap = new Dictionary<int, HashSet<string>>();
 
+        var random = new Random();
+
         osmMap.Mutate(context =>
         {
             Console.WriteLine("Plotting BLE packets");
@@ -360,75 +580,63 @@ public class Program
                 if (adManufacturer != 0x183) // Walt Disney
                     continue;
 
-                var advertType = (packet[36] << 8) | packet[37];
-                if (advertType != 0x1004) // Location Beacon
-                    continue;
+                const int adTypeAndMfrIdSize = 3;
+                var adLength = packet[32] - adTypeAndMfrIdSize;
+                var ad = packet[36..(36 + adLength)];
 
-                var beaconId = packet[40];
+                var stream = manager.GetStream(ad);
+                var br = new BinaryReader(stream);
 
-                // if (beaconId != targetBeacon)
-                //     continue;
-
-                if (!waypointMacMap.ContainsKey(beaconId))
-                    waypointMacMap[beaconId] = new HashSet<string>();
-                waypointMacMap[beaconId].Add(macAddr.ToString());
-
-                var (x, y) = LatLonToOsmMapPoint(pos.Longitude, pos.Latitude, targetMap);
-                if (x > 1 || y > 1 || x < 0 || y < 0)
-                    continue;
-                var pt = new PointF((float)(x * osmMap.Width), (float)(y * osmMap.Height));
-
-                if (waypointToLocationMap.TryGetValue(beaconId, out var entry))
+                while (stream.Position != stream.Length)
                 {
-                    var (sx, sy) = WdwMapPointToOsmMapPoint(entry.X, entry.Y, targetMap);
-                    var spt = new PointF((float)(sx * osmMap.Width), (float)(sy * osmMap.Height));
+                    var deviceType = br.ReadByte();
+                    var payloadLength = br.ReadByte();
+                    var payload = br.ReadBytes(payloadLength);
 
-                    context.DrawLines(Color.Black.WithAlpha(0.1f), 1, pt, spt);
+                    if (deviceType == 0xC7)
+                    {
+                        var (x, y) = LatLonToOsmMapPoint(pos.Longitude, pos.Latitude, targetMap);
+                        if (x > 1 || y > 1 || x < 0 || y < 0)
+                            continue;
+                        var pt = new PointF((float)(x * osmMap.Width), (float)(y * osmMap.Height));
+                        context.Fill(Color.Blue, new EllipsePolygon(pt, 3));
+                    }
+                }
+
+                continue;
+
+                {
+                    // var advertType = (packet[36] << 8) | packet[37];
+                    // if (advertType != 0xcc03) // Location Beacon
+                    //     continue;
+
+                    // var beaconId = packet[40];
+
+                    // if (beaconId != targetBeacon)
+                    //     continue;
+
+                    // if (!waypointMacMap.ContainsKey(beaconId))
+                    //     waypointMacMap[beaconId] = new HashSet<string>();
+                    // waypointMacMap[beaconId].Add(macAddr.ToString());
+
+                    var (x, y) = LatLonToOsmMapPoint(pos.Longitude, pos.Latitude, targetMap);
+                    if (x > 1 || y > 1 || x < 0 || y < 0)
+                        continue;
+                    var pt = new PointF((float)(x * osmMap.Width), (float)(y * osmMap.Height));
+
+                    // if (waypointToLocationMap.TryGetValue(beaconId, out var entry))
+                    // {
+                    //     var (sx, sy) = WdwMapPointToOsmMapPoint(entry.X, entry.Y, targetMap);
+                    //     var spt = new PointF((float)(sx * osmMap.Width), (float)(sy * osmMap.Height));
+                    //
+                    //     context.DrawLines(Color.Black.WithAlpha(0.1f), 1, pt, spt);
+                    //     context.Fill(Color.Blue, new EllipsePolygon(pt, 3));
+                    // }
+                    // else
                     context.Fill(Color.Blue, new EllipsePolygon(pt, 3));
+
+                    // context.DrawText($"{beaconId} 0x{beaconId:X}", font, Color.Black, pt);
                 }
-                else
-                    context.Fill(Color.Cyan, new EllipsePolygon(pt, 3));
-
-                // context.DrawText($"{beaconId} 0x{beaconId:X}", font, Color.Black, pt);
-            }
-
-            Console.WriteLine(
-                $"Beacon MAC map ({waypointMacMap.Count} waypoints, {waypointMacMap.Values.SelectMany(set => set).Distinct().Count()} physical addresses)");
-            Console.WriteLine("| Beacon | Physical Address |");
-            Console.WriteLine("| --- | --- |");
-
-            foreach (var (waypoint, macs) in waypointMacMap)
-            {
-                var beacon = beaconData.Values.FirstOrDefault(entry => entry.WaypointId == waypoint);
-                if (beacon == null)
-                    Console.WriteLine($"\t| <orphan 0x{waypoint:X2}> | {string.Join(", ", macs)} |");
-                else
-                    Console.WriteLine($"\t| {beacon.Name} | {string.Join(", ", macs)} |");
-            }
-
-            Console.WriteLine("Plotting interop packets");
-            foreach (var (time, pos, beaconName) in interopPacketData.Take(0))
-            {
-                if (pos.SatelliteCount < 10)
-                    continue;
-
-                var (x, y) = LatLonToOsmMapPoint(pos.Longitude, pos.Latitude, targetMap);
-                if (x > 1 || y > 1 || x < 0 || y < 0)
-                    continue;
-                var pt = new PointF((float)(x * osmMap.Width), (float)(y * osmMap.Height));
-
-                if (nameToLocationMap.TryGetValue(beaconName, out var beaconLocation))
-                {
-                    var (sx, sy) = WdwMapPointToOsmMapPoint(beaconLocation.X, beaconLocation.Y, targetMap);
-                    var spt = new PointF((float)(sx * osmMap.Width), (float)(sy * osmMap.Height));
-
-                    context.DrawLines(Color.Black.WithAlpha(0.1f), 1, pt, spt);
-                    context.Fill(Color.Orange, new EllipsePolygon(pt, 3));
-                }
-                else
-                    context.Fill(Color.Yellow, new EllipsePolygon(pt, 3));
-
-                // context.DrawText($"{beaconId} 0x{beaconId:X}", font, Color.Black, pt);
             }
 
             Console.WriteLine("Plotting beacons");
