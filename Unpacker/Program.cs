@@ -3,6 +3,9 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using BleSniffer;
+using DotnetBleServer.Advertisements;
+using DotnetBleServer.Core;
+using HashtagChris.DotNetBlueZ;
 using Microsoft.IO;
 using Mtk33x9Gps;
 using SixLabors.Fonts;
@@ -241,7 +244,35 @@ public class Program
         );
     }
 
-    public static void Main /*DumpAllAdTypes*/(string[] args)
+    public static async Task Main(string[] args)
+    {
+        var adapter = (await BlueZManager.GetAdaptersAsync()).FirstOrDefault();
+        if (adapter == null)
+            throw new InvalidOperationException("Adapter not found");
+
+        var serverContext = new ServerContext(adapter.ObjectPath);
+
+        await serverContext.Connect();
+
+        await new AdvertisingManager(serverContext).CreateAdvertisement(
+            "/org/bluez/stardust/advert",
+            new AdvertisementProperties
+            {
+                Type = "peripheral",
+                LocalName = "Stardust",
+                ManufacturerData = new Dictionary<ushort, object>
+                {
+                    // 100400038FA1
+                    [0x0183] = Convert.FromHexString("10040003A3A1100400033EA1050B01184CD9D2D728490B4713")
+                }
+            }
+        );
+
+        Console.WriteLine("Running");
+        await Task.Delay(-1);
+    }
+
+    public static void MainDumpAllAdTypes(string[] args)
     {
         Console.WriteLine("Loading GPS data");
         // Load GPS data

@@ -8,7 +8,9 @@
     </PropertyGroup>
 
     <ItemGroup>
+        <ProjectReference Include="..\..\dotnet-ble-server\DotnetBleServer\DotnetBleServer.csproj"/>
         <ProjectReference Include="..\BleSniffer\BleSniffer.csproj" />
+        <ProjectReference Include="..\DotNet-BlueZ\DotNet-BlueZ.csproj"/>
         <ProjectReference Include="..\Mtk33x9Gps\Mtk33x9Gps.csproj" />
     </ItemGroup>
 
